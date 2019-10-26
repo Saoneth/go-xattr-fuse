@@ -121,6 +121,13 @@ func (x *xattrFs) Mkdir(name string, mode uint32, context *fuse.Context) fuse.St
 
 func (x *xattrFs) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 	slog.D(name)
+	tx, err := db.Begin(true)
+	if err != nil {
+		slog.P("database cannot begin transaction: `%v'", err)
+		return fuse.EBUSY
+	}
+	tx.DeleteBucket([]byte(name))
+
 	return x.FileSystem.Unlink(name, context)
 }
 
@@ -136,6 +143,40 @@ func (x *xattrFs) Symlink(value string, linkName string, context *fuse.Context) 
 
 func (x *xattrFs) Rename(oldName string, newName string, context *fuse.Context) (code fuse.Status) {
 	slog.D("%s -> %s", oldName, newName)
+
+	tx, err := db.Begin(true)
+	if err != nil {
+		slog.P("database cannot begin transaction: `%v'", err)
+		return fuse.EBUSY
+	}
+
+	defer tx.Rollback()
+	oldBucket, err := tx.CreateBucketIfNotExists([]byte(oldName))
+	if err != nil {
+		slog.P("failed to create bucket `%s'", newName)
+		return fuse.EIO
+	}
+
+	newBucket, err := tx.CreateBucketIfNotExists([]byte(newName))
+	if err != nil {
+		slog.P("failed to create bucket `%s'", newName)
+		return fuse.EIO
+	}
+
+	oldBucket.ForEach(func(k, v []byte) error {
+		return newBucket.Put(k, v)
+	})
+	if err != nil {
+		slog.P("failed to copy data: %s", err)
+	}
+
+	tx.DeleteBucket([]byte(oldName))
+
+	if err := tx.Commit(); err != nil {
+		slog.P("commit failed on renaming `%s' to '%s'", oldName, newName)
+		return fuse.EIO
+	}
+
 	return x.FileSystem.Rename(oldName, newName, context)
 }
 
