@@ -163,7 +163,7 @@ func (x *xattrFs) Rename(oldName string, newName string, context *fuse.Context) 
 		return fuse.EIO
 	}
 
-	err := oldBucket.ForEach(func(k, v []byte) error {
+	err = oldBucket.ForEach(func(k, v []byte) error {
 		return newBucket.Put(k, v)
 	})
 	if err != nil {
