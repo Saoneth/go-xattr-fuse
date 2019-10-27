@@ -41,8 +41,8 @@ func (x *xattrFs) SetXAttr(name string, attr string, data []byte, flags int, con
 	return fuse.OK
 }
 
-func boltBucket(name string) (*bolt.Tx, *bolt.Bucket, *bolt.Cursor, fuse.Status) {
-	tx, err := db.Begin(true)
+func boltBucket(name string, readOnly bool) (*bolt.Tx, *bolt.Bucket, *bolt.Cursor, fuse.Status) {
+	tx, err := db.Begin(!readOnly)
 	if err != nil {
 		slog.P("database cannot begin transaction: `%v'", err)
 		return nil, nil, nil, fuse.EBUSY
@@ -56,22 +56,19 @@ func boltBucket(name string) (*bolt.Tx, *bolt.Bucket, *bolt.Cursor, fuse.Status)
 
 func (x *xattrFs) GetXAttr(name string, attr string, context *fuse.Context) ([]byte, fuse.Status) {
 	slog.D("getxattr bucket `%s' name `%s'", name, attr)
-	tx, _, c, err := boltBucket(name)
+	tx, b, _, err := boltBucket(name, true)
 	defer tx.Rollback()
 	if err != fuse.OK {
 		return nil, err
 	}
-	for k, v := c.First(); k != nil; k, v = c.Next() {
-		if string(k) == attr {
-			return v, fuse.OK
-		}
-	}
-	return nil, fuse.OK
+	v := b.Get([]byte(attr))
+	slog.D("value: '%s'", v)
+	return v, fuse.OK
 }
 
 func (x *xattrFs) ListXAttr(name string, context *fuse.Context) ([]string, fuse.Status) {
 	slog.D("listxattr bucket `%s'", name)
-	tx, _, c, err := boltBucket(name)
+	tx, _, c, err := boltBucket(name, true)
 	defer tx.Rollback()
 	if err != fuse.OK {
 		return nil, err
@@ -86,7 +83,7 @@ func (x *xattrFs) ListXAttr(name string, context *fuse.Context) ([]string, fuse.
 
 func (x *xattrFs) RemoveXAttr(name string, attr string, context *fuse.Context) fuse.Status {
 	slog.D("setxattr bucket `%s' name `%s'", name, attr)
-	tx, b, _, err := boltBucket(name)
+	tx, b, _, err := boltBucket(name, false)
 	defer tx.Rollback()
 	if err != fuse.OK {
 		return err
@@ -128,6 +125,10 @@ func (x *xattrFs) Unlink(name string, context *fuse.Context) (code fuse.Status) 
 	}
 	tx.DeleteBucket([]byte(name))
 
+	if err := tx.Commit(); err != nil {
+		slog.P("commit failed on bucket `%s'", name)
+		return fuse.EIO
+	}
 	return x.FileSystem.Unlink(name, context)
 }
 
