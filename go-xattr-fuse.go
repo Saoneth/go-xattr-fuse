@@ -41,22 +41,22 @@ func (x *xattrFs) SetXAttr(name string, attr string, data []byte, flags int, con
 	return fuse.OK
 }
 
-func boltBucket(name string, readOnly bool) (*bolt.Tx, *bolt.Bucket, *bolt.Cursor, fuse.Status) {
+func boltBucket(name string, readOnly bool) (*bolt.Tx, *bolt.Bucket, fuse.Status) {
 	tx, err := db.Begin(!readOnly)
 	if err != nil {
 		slog.P("database cannot begin transaction: `%v'", err)
-		return nil, nil, nil, fuse.EBUSY
+		return nil, nil, fuse.EBUSY
 	}
 	b := tx.Bucket([]byte(name))
 	if b == nil {
-		return tx, nil, nil, fuse.ENOENT
+		return tx, nil, fuse.ENOENT
 	}
-	return tx, b, b.Cursor(), fuse.OK
+	return tx, b, fuse.OK
 }
 
 func (x *xattrFs) GetXAttr(name string, attr string, context *fuse.Context) ([]byte, fuse.Status) {
 	slog.D("getxattr bucket `%s' name `%s'", name, attr)
-	tx, b, _, err := boltBucket(name, true)
+	tx, b, err := boltBucket(name, true)
 	defer tx.Rollback()
 	if err != fuse.OK {
 		return nil, err
@@ -68,12 +68,13 @@ func (x *xattrFs) GetXAttr(name string, attr string, context *fuse.Context) ([]b
 
 func (x *xattrFs) ListXAttr(name string, context *fuse.Context) ([]string, fuse.Status) {
 	slog.D("listxattr bucket `%s'", name)
-	tx, _, c, err := boltBucket(name, true)
+	tx, b, err := boltBucket(name, true)
 	defer tx.Rollback()
 	if err != fuse.OK {
 		return nil, err
 	}
 	lis := make([]string, 1)
+	c := b.Cursor()
 	for k, _ := c.First(); k != nil; k, _ = c.Next() {
 		lis = append(lis, string(k))
 	}
@@ -83,7 +84,7 @@ func (x *xattrFs) ListXAttr(name string, context *fuse.Context) ([]string, fuse.
 
 func (x *xattrFs) RemoveXAttr(name string, attr string, context *fuse.Context) fuse.Status {
 	slog.D("setxattr bucket `%s' name `%s'", name, attr)
-	tx, b, _, err := boltBucket(name, false)
+	tx, b, err := boltBucket(name, false)
 	defer tx.Rollback()
 	if err != fuse.OK {
 		return err
